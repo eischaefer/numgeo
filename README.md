@@ -14,7 +14,7 @@ The algorithm builds on a long history of work by others. It also has a lot of m
 
 1. Sample points along the boundary of an input polygon, including around any holes.
 2. Compute a Voronoi diagram. (https://en.wikipedia.org/wiki/Voronoi_diagram)
-3. Isolate the "graph skeleton" from the other extraneous bits  in the Voronoi diagram (which together make up the graph skeleton's "complement"). For example, each hole in polygon has its own skeleton that should be discarded.
+3. Isolate the "graph skeleton" from the other extraneous bits  in the Voronoi diagram (which together make up the graph skeleton's "complement"). For example, each hole in a polygon has its own skeleton that should be discarded.
 4. "Partition out" paths from the graph skeleton to incrementally construct the "partitioned skeleton".
    - This is a bit like moving Lego blocks (segments) from one toy box (skeleton) to another, stacking some of them together during the transfer (to form continuous paths of many segments).
 5. Optionally add "tails" to the paths so that they extend to polygon's boundary rather than stopping short.
