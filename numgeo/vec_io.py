@@ -2629,7 +2629,6 @@ class Information(_util.Instantiable, Description):
 
     def _fetch_geom_type_gdal(self):
         src, lyr = self._fetch_gdal_source_and_layer()
-#        print("\n\n\n***{}***\n\n\n".format(lyr.GetGeomType())) ####
         return _geom._wkb_type_to_geom_type[lyr.GetGeomType()]
 
     @staticmethod
@@ -3666,7 +3665,6 @@ class WriteCursor(_util.Instantiable, Cursor):
                     # *REDEFINITION*
                     min_schema = i.schema.union(min_schema)
                 except:
-                    print("\n\n\n***\n{}\n***\n\n\n".format(self.path)) ####
                     raise TypeError(
                         "target exists, but one or more of its fields cannot receive the data type specified in fields"
                         )
