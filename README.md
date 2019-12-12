@@ -32,9 +32,9 @@ from numgeo.scripts.skel import process
 process(r"path/to/polygon_shapefile.shp", interval=0.1, min_normalized_length=0.)
 ```
 
-`interval`, in effect, specifies the desired resolution of the output skeleton, in map units (e.g., meters). If the narrowest constriction in your input polygons is *x* map units, you should specify `interval` *<0.5x*.
+`interval`, in effect, specifies the desired resolution of the outputted skeleton, in map units (e.g., meters). If the narrowest constriction in your input polygons is *x* map units, you should specify `interval` *<0.5x*.
 
-`min_normalized_length`, in effect, specifies how simple you want the output skeleton to be, with higher values corresponding to greater simplicity.  Any value less than 1. results in no simplification, so the "raw" skeleton itself is output, which may have a lot of unwanted bits.
+`min_normalized_length`, in effect, specifies how simple you want the outputted skeleton to be, with higher values corresponding to greater simplicity.  Any value less than 1. results in no simplification, so the "raw" skeleton itself is output, which may have a lot of unwanted bits.
 
 Therefore, if you were to run the example code, you'd derive a "raw" skeleton at a resolution of 0.1 m (if your map unit is one meter). Because you did not specify an output path, the skeleton would default to *path/to/polygon_shapefile_skel.shp*.
 
@@ -42,6 +42,6 @@ Therefore, if you were to run the example code, you'd derive a "raw" skeleton at
 
 1. It is *highly* recommended that you read the documentation on Installation before installing numgeo.
 2. Processing time and memory use both increase exponentially with progressively smaller `interval` values, so be careful when choosing a value.
-3. You might consider calling `process(...)` a few times, each time with different `interval` and `min_normalized_length` values, to build an intuition for how these arguments affect the output skeleton.
+3. You might consider calling `process(...)` a few times, each time with different `interval` and `min_normalized_length` values, to build an intuition for how these arguments affect the outputted skeleton.
    - In that case, you can specify `out_path_prefix` to avoid overwriting previous outputs. For example, `out_path_prefix="A_"` would output to *path/to/A_polygon_shapefile_skel.shp*.
 
