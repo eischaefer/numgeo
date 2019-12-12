@@ -1,3 +1,7 @@
+"""
+numgeo, a geospatial package that supports skeletonization.
+"""
+
 # Copyright 2019 Ethan I. Schaefer
 #
 # This file is part of numgeo.
@@ -15,5 +19,5 @@
 # You should have received a copy of the GNU General Public License
 # along with numgeo.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = "0.0.1a0"
+__version__ = "0.0.2a0"
 __author__ = "Ethan I. Schaefer"
