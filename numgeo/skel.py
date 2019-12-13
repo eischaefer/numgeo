@@ -19,7 +19,7 @@ Framework and algorithm to derive linear skeletons from polygons.
 # You should have received a copy of the GNU General Public License
 # along with numgeo.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = "0.0.1a0"
+__version__ = "0.0.2a0"
 __author__ = "Ethan I. Schaefer"
 
 
@@ -758,14 +758,11 @@ class Skeletal(object):
         if fast and self._tail_coords_arrays is not _empty_tuple:
             return False
 
-        # Determine which end(s) are stubs.
-        skel = self.skeleton
-        vor_vert_idx_to_partitioned_degree_array = skel._vor_vert_idx_to_partitioned_degree_array
-        start_vor_vert_idx, end_vor_vert_idx = self._aligned_key.tuple
-        start_is_stub = vor_vert_idx_to_partitioned_degree_array[start_vor_vert_idx] == 1
-        end_is_stub = vor_vert_idx_to_partitioned_degree_array[end_vor_vert_idx] == 1
-
         # Return immediately if tail addition was already attempted.
+        skel = self.skeleton
+        start_vor_vert_idx, end_vor_vert_idx = self._aligned_key.tuple
+        start_is_stub = skel.get_node_degree(start_vor_vert_idx, True) == 1
+        end_is_stub = skel.get_node_degree(end_vor_vert_idx, True) == 1
         if self._tail_coords_arrays is not _empty_tuple:
             tail_coords_arrays = self._tail_coords_arrays
             return (False,
@@ -780,118 +777,15 @@ class Skeletal(object):
         # addition.
         self.untailed_length2D
 
-        # Prepare for finding tails.
-        self._tail_coords_arrays = tail_coords_arrays = []
-        fetch_associated_sample_index = skel._fetch_associated_sample_index
-        polygon_boundary = skel.polygon.boundary
-        polygon_has_a_hole = len(polygon_boundary) > 1
-        sampled_coords_array = skel.sampled_coords_array
-        if polygon_has_a_hole:
-            get_ring_idx_from_sample_idx = skel._get_ring_idx_from_sample_idx
-            last_sample_idx_each_ring_array = skel._last_sample_idx_each_ring_array
-        else:
-            # Note: Invariant values.
-            ring, = polygon_boundary
-            first_samp_idx_this_ring = 0
-            samp_count_this_ring = len(sampled_coords_array) + 1
-        tolerance = 2 + bool(cut)
-        interval = skel.interval
-
         # Find tail for each stub end, as applicable.
+        self._tail_coords_arrays = tail_coords_arrays = []
         added_tail_count = 0  # Initialize.
-        for is_stub, vor_vert_idx in ((start_is_stub, start_vor_vert_idx),
-                                      (end_is_stub, end_vor_vert_idx)):
-            try:
-                assert is_stub
-
-                # Find the minimum and maximum associated sample
-                # indices.
-                samp_idxs_set = fetch_associated_sample_index(vor_vert_idx,
-                                                              True)
-                min_samp_idx = min(samp_idxs_set)
-                max_samp_idx = max(samp_idxs_set)
-
-                # If input polygon has holes, check that both samples
-                # come from the same ring.
-                if polygon_has_a_hole:
-                    min_ring_idx = get_ring_idx_from_sample_idx(min_samp_idx)
-                    max_ring_idx = get_ring_idx_from_sample_idx(max_samp_idx)
-                    assert min_ring_idx == max_ring_idx
-                    ring = polygon_boundary[min_ring_idx]
-                    if min_ring_idx:
-                        first_samp_idx_this_ring = last_sample_idx_each_ring_array[min_ring_idx - 1] + 1
-                    else:
-                        first_samp_idx_this_ring = 0
-                    samp_count_this_ring = (
-                        last_sample_idx_each_ring_array[min_ring_idx]
-                        - first_samp_idx_this_ring
-                        + 1)
-
-                # If the difference between the minimum and maximum
-                # associated sampled indices is greater than allowed,
-                # check whether "rotating" the indices resolves this
-                # issue.
-                # Note: For example, consider an input polygon that has
-                # only one ring, which has 100 samples. If the stub is
-                # associated with samples at indices 1 and 99, the
-                # apparent index difference is large but, in fact, the
-                # sample at index 0 neighbors both of these samples. The
-                # code below would convert these associated sample
-                # indices to 1 (unchanged) and -1, respectively.
-                if max_samp_idx - min_samp_idx > tolerance:
-                    rotated_samp_idxs = [samp_idx - samp_count_this_ring
-                                         if samp_idx - min_samp_idx > tolerance
-                                         else samp_idx
-                                         for samp_idx in samp_idxs_set]
-                    # *REASSIGNMENT*
-                    min_samp_idx = min(rotated_samp_idxs)
-                    # *REASSIGNMENT*
-                    max_samp_idx = max(rotated_samp_idxs)
-                    assert max_samp_idx - min_samp_idx <= tolerance
-
-                # Set tail end.
-                # Note: In essence, the number of samples lying between
-                # the two furthest separated associated samples is
-                # counted. If that number is odd, the middle sample is
-                # used as the tail end. Otherwise a new coordinate is
-                # interpolated along the boundary. Usually that
-                # coordinate lies midway between the two central samples
-                # from the span between the two furthest separated
-                # associated samples, but in the special case that those
-                # two central samples bracket the closing vertex of the
-                # ring, it is merely guaranteed that the tail end is
-                # within the sampling interval of the midpoint between
-                # those two central samples.
-                one_float_array = _numpy_empty((1,))
-                if (max_samp_idx - min_samp_idx) % 2:
-                    dist_along_ring = (0.5*(min_samp_idx + max_samp_idx)
-                                       - first_samp_idx_this_ring) * interval
-                    if dist_along_ring < 0.:
-                        # Note: Account for index rotation.
-                        dist_along_ring += ring.length
-                    one_float_array[0] = dist_along_ring
-                    tail_coords_arrays.append(
-                        ring.interpolate(one_float_array)[0]
-                        )
-                else:
-                    targ_samp_idx = (min_samp_idx + max_samp_idx) // 2
-                    if targ_samp_idx < first_samp_idx_this_ring:
-                        # Ex: min_samp_idx is -2 and max_samp_idx is 0,
-                        # so targ_samp_idx is initially -1.
-                        targ_samp_idx += samp_count_this_ring
-                    tail_coords_arrays.append(
-                        sampled_coords_array[targ_samp_idx]
-                        )
-                added_tail_count += 1
-
-            # If any requirements failed, register no tail.
-            # Note: Namely, end may not be a stub, or its associated
-            # sample coordinates may come from different rings, or the
-            # number of samples separating those two coordinates may be
-            # greater than tolerance.
-            except AssertionError:
-                tail_coords_arrays.append(None)
+        for vor_vert_idx in (start_vor_vert_idx, end_vor_vert_idx):
+            tail_end = skel.get_tail_end(vor_vert_idx, test=False, cut=cut)            
+            tail_coords_arrays.append(tail_end)
+            if tail_end is None:
                 continue
+            added_tail_count += 1
 
         # If no tails were added, return immediately.
         if not added_tail_count:
@@ -1304,11 +1198,13 @@ class Skeleton(_util.Lazy):
     _max_known_unsafe_interval = None
     _min_cutting_failure_interval = _python_inf
     _min_known_safe_interval = _python_inf
+    _vor_vert_idx_to_contained_int_array = None
     target_memory_footprint = None
 
     # User-facing attribute defaults.
     had_hyperhub = False  # This is the default.
     initialized = False  # This is the default.
+    naive_skel_vor_vert_idxs_array = None    
 
     def __init__(self, polygon, interval, isolation_mode="SAFE",
                  memory_option=0, targ_GB=None, **kwargs):
@@ -1341,7 +1237,9 @@ class Skeleton(_util.Lazy):
         The curious should consider reading the following paper for a more
         detailed, albeit technical, description of the algorithm, including some
         very helpful figures:
-            [placeholder]
+            Schaefer, E. I., & Pelletier, J.D. (in review). An algorithm to 
+            reduce a river network or other graph-like polygon to a set of 
+            lines. Computers & Geosciences.
 
         polygon is a Polygon for which skeleton derivation will be executed.
 
@@ -1374,20 +1272,31 @@ class Skeleton(_util.Lazy):
                 If interval is anywhere coarser than half the polygon's local
                 width, the skeleton may not be contained to polygon (Theorem 4.1
                 of Brandt and Algazi (1992)). If there is any ambiguity as to
-                whether a (degree 3) hub belongs to the skeleton, it is "cut"
+                whether a (degree-3) hub belongs to the skeleton, it is "cut"
                 along with all edges terminating at that hub. This is a
                 heuristic resolution to facilitate the isolation of the skeleton
                 from its complement when interval is coarser than ideal and can
                 have undesired effects on the resulting skeleton. Cutting is
                 only applied if not cutting would cause skeleton isolation to
-                fail. If any nodes are cut, they are stored to
-                .cut_vor_vert_idxs.
+                fail. If any nodes are cut, their Voronoi vertex indices are
+                stored to the array .cut_vor_vert_idxs_array.
             "SAFE"
                 At the two steps (2 and 4, as numbered further above) with the
                 greatest memory footprints, it is tested whether continued
                 processing would exhaust targ_GB. If such exhaustion is
                 predicted, processing is aborted and a MemoryError is raised.
-
+            "STORE"
+                If cutting is used:
+                    1) stores the array .naive_skel_vor_vert_idxs_array, which
+                       records the Voronoi vertex indices of all nodes that 
+                       provisionally were interpreted to belong to the skeleton 
+                       prior to cutting; all nodes ultimately interpreted to 
+                       belong to the skeleton form a strict subset of those 
+                       nodes
+                    2) optimizes .test_poly_contains_node()
+                Otherwise:
+                    .naive_skel_vor_vert_idxs_array is None.
+                
         Remaining arguments are documented with EasySkeleton.__init__().
 
         Note: Although it can be very useful to specify a zero interval or
@@ -1450,7 +1359,8 @@ class Skeleton(_util.Lazy):
         for option in isolation_mode.split("_"):
             isolation_option = _validate_string_option(
                 option, "option in isolation_mode",
-                ("CUT", "NAIVE", "VERIFY", "SAFE", "SAFETEST1", "SAFETEST2"),
+                ("", "CUT", "NAIVE", "VERIFY", "SAFE", "STORE",
+                 "SAFETEST1", "SAFETEST2"),
                 True
                 )
             if isolation_option.startswith("SAFETEST"):
@@ -1800,10 +1710,6 @@ class Skeleton(_util.Lazy):
             # If segment is bracketed by ring-closing samples, it is
             # peripheral.
             if (sample_idx0, sample_idx1) in closing_sample_idxs_set:
-                # Note: The line below would finalize segment
-                # categorization, where row_idx comes from iterating
-                # over is_nonperi_array.tolist().
-                # is_nonperi_array[row_idx] = False
                 continue
             nonperi_adj_dict[vor_vert_idx0].append(vor_vert_idx1)
             nonperi_adj_dict[vor_vert_idx1].append(vor_vert_idx0)
@@ -2349,9 +2255,11 @@ class Skeleton(_util.Lazy):
         # Contract adjacency dictionary of the skeleton and its
         # complement through binodes to create raw edge dictionary, and
         # quarantine any uninterrupted terminal loops.
-        # Note: Any hyperhubs are also cracked. As a consequence,
-        # uninterrupted non-terminal loops, which must stem from
-        # hyperhubs, are also addressed and remain in the raw skeleton.
+        # Note: Any hyperhubs are also cracked when _Components object 
+        # is created (by an internall call of 
+        # Skeleton._contract_through_binodes()). It is essential that 
+        # such cracking occur prior to isolation of the graph skeleton, 
+        # which assumes the absence of hyperhubs.
         nonperi_adj_dict = self._nonperi_adj_dict
         del self._nonperi_adj_dict
         components = _Components(self, nonperi_adj_dict)
@@ -2363,6 +2271,7 @@ class Skeleton(_util.Lazy):
         # Note: A maximum of 2 cut iterations are allowed. See note
         # further below.
         cut = 2 if "CUT" in isolation_mode else False
+        store = "STORE" in isolation_mode
 
         # Setup test polygon.
         # Note: The test polygon is either the input polygon or a proxy
@@ -2395,6 +2304,8 @@ class Skeleton(_util.Lazy):
         vor_vert_idx_to_contained_int_array = _numpy_zeros(
             (len(vor_vert_idx_to_graph_degree_array),), _numpy_int8
             )
+        if store:
+            self._vor_vert_idx_to_contained_int_array = vor_vert_idx_to_contained_int_array
         vor_vert_coords_array = self.voronoi_vertex_coords_array
         cut_vor_vert_idxs = []
         while True:
@@ -2505,6 +2416,8 @@ class Skeleton(_util.Lazy):
             # well as any edges that touch that hub.
             # Note: This "fix" is far from ideal, as explained in the
             # documentation.
+            if store and self.naive_skel_vor_vert_idxs_array is None:
+                self.naive_skel_vor_vert_idxs_array = cand_skel_vor_vert_idxs_array
             self._cutting_was_attempted = True
             for uncontained_hub_vor_vert_idx in cand_skel_uncontained_hub_vor_vert_idxs:
                 for adj_vor_idx in nonperi_adj_dict[uncontained_hub_vor_vert_idx]:
@@ -2526,9 +2439,13 @@ class Skeleton(_util.Lazy):
             # only two cut iterations are allowed.
             cut -= 1
 
+        # Minimize memory footprint of test polygon, if allowed.
+        if not store:
+            test_poly.minimize_memory()
+        
         # Store any cut Voronoi vertex indices in an array.
-        self._cut_vor_vert_idxs_array = _numpy_fromiter(cut_vor_vert_idxs,
-                                                        _numpy_int32)
+        self.cut_vor_vert_idxs_array = _numpy_fromiter(cut_vor_vert_idxs,
+                                                       _numpy_int32)
         del cut_vor_vert_idxs  # Release memory.
 
         # Permanently discard all complement edges.
@@ -2626,7 +2543,7 @@ class Skeleton(_util.Lazy):
 
         Additional nodes with duplicate (x, y) coordinates are added to the
         graph skeleton (and relevant records) to ensure that no hub has degree
-        >3. Effectively, this is identical to projecting a loop at the hub
+        >3. In effect, this is nearly identical to projecting a loop at the hub
         upward, out of the x-y plane. At various points along this loop,
         adjacent nodes in the x-y plane are attached so that no juncture has
         more than three edges. A loop is used to ensure that no stubs are added
@@ -2644,6 +2561,18 @@ class Skeleton(_util.Lazy):
         attributes assigned by the current function and likewise assign to these
         attributes compatible data in any overriding function. (See source
         code.)
+        
+        Warning: If multiple edges from a single hyperhub end at the same node,
+        the 0-size loop cracking strategy (described further above) fails 
+        because it cannot reduce the degree of all affected nodes to <=3
+        (without recursion, which is not attempted). If this case is 
+        encountered, The current function raises an error. Fortunately, this
+        case (though tested for) should be impossible in practice as duplicate
+        edges linking the same node pair cannot occur among Voronoi segments
+        and hyperhubs are cracked prior to contraction through binodes. If 
+        hyperhubs were *not* cracked at that time, contraction through binodes
+        could cause one or more hyperhubs to have duplicate edges linking the
+        same node pair.
         """
         # Create loop of duplicate nodes to crack each hyperhub in the
         # adjacency dictionary.
@@ -2656,6 +2585,15 @@ class Skeleton(_util.Lazy):
         for orig_vor_vert_idx in adj_dict.keys():
             adj_idxs = adj_dict[orig_vor_vert_idx]
             if len(adj_idxs) > 3:
+                
+                # As a precaution, check that no linked nodes are 
+                # duplicated. (See warning in function documentation.)
+                if len(adj_idxs) > len(set(adj_idxs)):
+                    raise TypeError(
+                            "Cannot crack hyperhub at following Voronoi index due to parallel edges: {}".format(
+                                    orig_vor_vert_idx
+                                    )
+                            )
 
                 # As an illustrative example, consider a hyperhub with
                 # the following edges: 0-1, 0-2, 0-3, and 0-4. In this
@@ -3378,11 +3316,13 @@ class Skeleton(_util.Lazy):
             if isinstance(input_array, basestring):
                 ID = input_array
                 if ID not in input_array_ID_to_unique_array:
-                    unique_array = self.get_nodes(input_array, coords=False)[0]
-                    if unique_array is None:
-                        # Generated array is empty and therefore
-                        # excludes all possible paths.
+                    node_info = self.get_nodes(input_array, coords=False)
+                    if node_info is None:
+                        # No matchcing ndoes exist and therefore all 
+                        # possible paths are excluded.
                         return std_null_result
+                    unique_array = node_info[0]
+                    del node_info                    
             else:
                 ID = id(input_array)
                 if ID not in input_array_ID_to_unique_array:
@@ -4703,7 +4643,52 @@ class Skeleton(_util.Lazy):
 
         # Register line.
         if targ_line_dict is not None:
-            targ_line_dict[key] = line
+            # If registering a line to the graph skeleton but its key is
+            # already registered, the line must be part of a parallel
+            # edge pair. Split one of these edges.
+            # Note: Parallel edges occur when a pair of nodes (e.g., A
+            # and B) are each linked directly to the other by two 
+            # different edges (e.g., A-B and A-B). (Because hyperhubs
+            # are cracked, no more than two edges can ever be parallel
+            # to each other.) The use of frozenset-like start-end (A-B) 
+            # pairs as keys in edge dictionaries throughout the current 
+            # module relies on a one-to-one correspondence between node 
+            # pairs and edges. Parallel edges therefore cannot be 
+            # permitted. Parallel edges are likely rare in practice 
+            # (e.g., a single spurious edge on either A-B path would 
+            # break the parallelism), and therefore if they are 
+            # encoutnered, one of the two edges is split ("un-
+            # contracted" at a binode) to avoid a more complicated 
+            # bookkeeping system than the start-end keys currently used.            
+            if (targ_line_dict is self._graph_edge_dict and 
+                key in targ_line_dict):
+                # If line is only a segment, so that there is no binode
+                # at which it can be split, instead split its mate 
+                # (i.e., the parallel edge that was registered earlier).
+                # Note: The Voronoi vertex degree bookkeeping performed
+                # earlier, when the mate was registered, need not be
+                # undone now. However, as the corresponding bookkeeping 
+                # has yet to be done for line, it is still performed 
+                # further below, just as in the simpler case in which no
+                # splitting was required.
+                if len(vor_vert_idxs_array) > 2:
+                    unsplit_vor_vert_idxs_array = vor_vert_idxs_array
+                else:
+                    unsplit_vor_vert_idxs_array = targ_line_dict[key].vor_vert_idxs_array
+                    # Replace mate with line, as mate will now be split
+                    # and its two halves re-registered.
+                    targ_line_dict[key] = line
+                half_vert_count = len(unsplit_vor_vert_idxs_array) // 2
+                line_part1 = self._merge_path(
+                        unsplit_vor_vert_idxs_array[:half_vert_count+1]
+                        )
+                line_part2 = self._merge_path(
+                        unsplit_vor_vert_idxs_array[half_vert_count:]
+                        )
+                targ_line_dict[line_part1._aligned_key] = line_part1
+                targ_line_dict[line_part2._aligned_key] = line_part2                    
+            else:
+                targ_line_dict[key] = line
             if (update_node_degrees
                 and targ_vor_vert_idxs_to_degree_array is not None):
                 targ_vor_vert_idxs_to_degree_array[vor_vert_idxs_array] += 2
@@ -4885,7 +4870,7 @@ class Skeleton(_util.Lazy):
             .describe_line()
             .get_node_degree()
         """
-        degree = self.describe(index, partitioned)
+        degree = self.get_node_degree(index, partitioned)
         if degree == 1:
             return "stub"
         if degree == 2:
@@ -5350,10 +5335,10 @@ class Skeleton(_util.Lazy):
         # Identify the corresponding Voronoi vertex indices directly for
         # the special case that only cut nodes are requested.
         if kind == "cut":
-            if hasattr(self, "_cut_vor_vert_idxs_array"):
+            if hasattr(self, "cut_vor_vert_idxs_array"):
                 # Note: Do not return persistent record (to avoid its
                 # modification.)
-                vor_vert_idxs_array = self._cut_vor_vert_idxs_array.copy()
+                vor_vert_idxs_array = self.cut_vor_vert_idxs_array.copy()
             else:
                 vor_vert_idxs_array = _empty_tuple  # Placeholder.
 
@@ -5665,6 +5650,127 @@ class Skeleton(_util.Lazy):
         # Return.
         return (vor_vert_idxs_array, coords_array, degrees_array)
 
+
+    def get_tail_end(self, index, partitioned=True, test=True, cut=True):
+        """
+        Get the coordinates of a tail's end given its (stub) stem node.
+        
+        If a suitable tail end can be found, an array of shape (2,) is 
+        returned. Otherwise, None is returned.
+        
+        index is an integer that specifies the Voronoi vertex index (i.e., row
+        in .voronoi.out_coords_array, where .voronoi is a Voronoi2D) of the node
+        to serve as the tail's stem.
+        
+        partitioned is a boolean that specifies whether the tail stem specified
+        by index should be tested against the partitioned skeleton. If 
+        partitioned is False, the tail stem is tested against the graph 
+        skeleton. If test is False, this argument is ignored.
+        
+        test is a boolean that specifies whether it should be tested that index
+        refers to a stub in the skeleton implied by the partitioned argument. If
+        test is True and the test fails, a TypeError is raised.
+        
+        cut is a boolean that specifies whether tails should be sought for stubs
+        that were formed by the cutting involved in the "CUT" isolation_mode
+        option specified at initialization.
+        """
+        # Prepare.
+        if test:
+            if partitioned:
+                vor_vert_idx_to_degree_array = self._vor_vert_idx_to_partitioned_degree_array
+            else:
+                vor_vert_idx_to_degree_array = self._vor_vert_idx_to_graph_degree_array
+            if vor_vert_idx_to_degree_array[index] != 1:
+                raise TypeError(
+                        "index does not refer to a stub in the {} skeleton: {}".format(
+                                "partitioned" if partitioned else "graph", 
+                                index
+                                )
+                        )
+        polygon_boundary = self.polygon.boundary
+        polygon_has_a_hole = len(polygon_boundary) > 1
+        if polygon_has_a_hole:
+            get_ring_idx_from_sample_idx = self._get_ring_idx_from_sample_idx
+            last_sample_idx_each_ring_array = self._last_sample_idx_each_ring_array
+        else:
+            # Note: Invariant values.
+            ring, = polygon_boundary
+            first_samp_idx_this_ring = 0
+            samp_count_this_ring = len(self.sampled_coords_array) + 1
+        tolerance = 2 + bool(cut)
+        
+        # Find the minimum and maximum associated sample indices.
+        samp_idxs_set = self._fetch_associated_sample_index(index, True)
+        min_samp_idx = min(samp_idxs_set)
+        max_samp_idx = max(samp_idxs_set)
+
+        # If input polygon has holes, check that both samples comes from
+        # the same ring.
+        if polygon_has_a_hole:
+            min_ring_idx = get_ring_idx_from_sample_idx(min_samp_idx)
+            max_ring_idx = get_ring_idx_from_sample_idx(max_samp_idx)
+            if min_ring_idx != max_ring_idx:
+                return None
+            ring = polygon_boundary[min_ring_idx]
+            if min_ring_idx:
+                first_samp_idx_this_ring = last_sample_idx_each_ring_array[min_ring_idx - 1] + 1
+            else:
+                first_samp_idx_this_ring = 0
+            samp_count_this_ring = (
+                last_sample_idx_each_ring_array[min_ring_idx]
+                - first_samp_idx_this_ring
+                + 1)
+
+        # If the difference between the minimum and maximum associated
+        # sampled indices is greater than allowed, check whether 
+        # "rotating" the indices resolves this issue.
+        # Note: For example, consider an input polygon that has only one
+        # ring, which has 100 samples. If the stub is associated with 
+        # samples at indices 1 and 99, the apparent index difference is 
+        # large but, in fact, the sample at index 0 neighbors both of 
+        # these samples. The code below would convert these associated 
+        # sample indices to 1 (unchanged) and -1, respectively.
+        if max_samp_idx - min_samp_idx > tolerance:
+            rotated_samp_idxs = [samp_idx - samp_count_this_ring
+                                 if samp_idx - min_samp_idx > tolerance
+                                 else samp_idx
+                                 for samp_idx in samp_idxs_set]
+            # *REASSIGNMENT*
+            min_samp_idx = min(rotated_samp_idxs)
+            # *REASSIGNMENT*
+            max_samp_idx = max(rotated_samp_idxs)
+            if max_samp_idx - min_samp_idx > tolerance:
+                return None
+
+        # Determine tail end.
+        # Note: In essence, the number of samples lying between the two
+        # furthest separated associated samples is counted. If that 
+        # number is odd, the middle sample is used as the tail end. 
+        # Otherwise a new coordinate is interpolated along the boundary.
+        # Usually that coordinate lies midway between the two central 
+        # samples from the span between the two furthest separated
+        # associated samples, but in the special case that those two 
+        # central samples bracket the closing vertex of the ring, it is 
+        # merely guaranteed that the tail end is within the sampling 
+        # interval of the midpoint between those two central samples.
+        one_float_array = _numpy_empty((1,))
+        if (max_samp_idx - min_samp_idx) % 2:
+            dist_along_ring = (0.5*(min_samp_idx + max_samp_idx)
+                               - first_samp_idx_this_ring) * self.interval
+            if dist_along_ring < 0.:
+                # Note: Account for index rotation.
+                dist_along_ring += ring.length
+            one_float_array[0] = dist_along_ring
+            return ring.interpolate(one_float_array)[0]
+        else:
+            targ_samp_idx = (min_samp_idx + max_samp_idx) // 2
+            if targ_samp_idx < first_samp_idx_this_ring:
+                # Ex: min_samp_idx is -2 and max_samp_idx is 0,
+                # so targ_samp_idx is initially -1.
+                targ_samp_idx += samp_count_this_ring
+            return self.sampled_coords_array[targ_samp_idx]
+
     def _delete_keys(self, keys_set, return_lines=False):
         """
         Low-level helper function for .delete_lines().
@@ -5824,8 +5930,10 @@ class Skeleton(_util.Lazy):
 
         For the same arguments, the current function is equivalent to
             len(self.get_nodes(...)[0])
-        The current function is never meaningfully slower than that code and can
-        be much faster.
+        except in the special case that there are no such nodes, so that
+        .get_nodes() returns None but the current function returns 0. The 
+        current function is never meaningfully slower than that code and can be
+        much faster.
 
         All arguments have the same meaning as in .get_nodes().
         """
@@ -7212,19 +7320,21 @@ class Skeleton(_util.Lazy):
         gobble is a boolean that specifies whether
             .gobble_paths(stub_indices, True, True)
         should be called immediately after pruning, where stub_indices is
-        generated by calling
+        generated by
             .get_nodes("stub", False, True, coords=False)[0]
-        prior to pruning. Therefore, any nodes that are newly stubs due to
-        pruning will be gobbled. This prevents some otherwise commonly
-        encountered but usually undesired consequences of pruning, such as
-        branches that are no longer connected to the rest of the partitioned
-        skeleton at either end and bridges that become disconnected from the
-        partitioned skeleton at one or both ends. If gobble is True, a tuple is
-        returned of the form
+        immediately before pruning (but see special case below). Therefore, any 
+        nodes that are newly stubs due to pruning will be gobbled. This 
+        prevents some otherwise commonly encountered but usually undesired 
+        consequences of pruning, such as branches that are no longer connected 
+        to the rest of the partitioned skeleton at either end and bridges that 
+        become disconnected from the partitioned skeleton at one or both ends. 
+        If gobble is True, a tuple is returned of the form
             (pruned_paths, gobbled_paths)
         where each item is a list of paths (LineString's) that were directly
         pruned or later gobbled, respectively. Note that gobbled_paths may
-        include paths whose kind is not the specified kind.
+        include paths whose kind is not the specified kind. In the special
+        case that there are no stub indices prior to pruning (so that the
+        .get_nodes() call above returns None), gobbled_paths is an empty list.
 
         kind is a string that specifies the kind of partitioned-out path to be
         pruned. In the special case that kind is "trunk" and the call would
@@ -7312,7 +7422,9 @@ class Skeleton(_util.Lazy):
 
         # Optionally prepare for later gobbling.
         if gobble:
-            stub_indices = self.get_nodes("stub", False, True, coords=False)[0]
+            node_info = self.get_nodes("stub", False, True, coords=False)
+            if node_info is not None:
+                stub_indices = node_info[0]
 
         # Delete paths.
         self._delete_keys({prunable_path._aligned_key
@@ -7320,7 +7432,10 @@ class Skeleton(_util.Lazy):
 
         # Optionally gobble and return.
         if gobble:
-            return (prunable_paths, self.gobble_paths(stub_indices, True, True))
+            if node_info is None:
+                return (prunable_paths, [])
+            return (prunable_paths, 
+                    self.gobble_paths(stub_indices, True, True))
         return prunable_paths
 
     def sweep(self, branch_test_func=None, bridge_test_func=None,
@@ -7460,6 +7575,28 @@ class Skeleton(_util.Lazy):
             if line.delta_z > 0.:
                 line.flip(False)
                 continue
+            
+    def test_poly_contains_node(self, index):
+        """
+        Test whether Voronoi vertex lies within test polygon.
+        
+        Returns boolean.
+        
+        index is an integer that specifies the Voronoi vertex index (i.e., row
+        in .voronoi.out_coords_array, where .voronoi is a Voronoi2D) of the node
+        to be tested.        
+        """
+        vor_vert_idx_to_contained_int_array = self._vor_vert_idx_to_contained_int_array
+        if vor_vert_idx_to_contained_int_array is not None:
+            contained_int = vor_vert_idx_to_contained_int_array[index]
+            if contained_int:
+                return contained_int == 2
+        result = self.test_poly._contains_point(
+                self.voronoi_vertex_coords_array[index].tolist()
+                )
+        if vor_vert_idx_to_contained_int_array is not None:
+            vor_vert_idx_to_contained_int_array[index] = result + 1
+        return result
 
 
 class EasySkeleton(Skeleton):
@@ -7504,7 +7641,9 @@ class EasySkeleton(Skeleton):
         description than is included here, as well as read the following paper
         for an even more detailed, albeit technical, description of this
         algorithm, including some very helpful figures:
-            [placeholder]
+            Schaefer, E. I., & Pelletier, J.D. (in review). An algorithm to 
+            reduce a river network or other graph-like polygon to a set of 
+            lines. Computers & Geosciences.
 
         polygon is a Polygon for which skeleton derivation will be executed.
 
@@ -7615,6 +7754,9 @@ class EasySkeleton(Skeleton):
             "MIN_MEAN_WIDTH_#" [2]
                 ...has at least the specified mean width, approximated by
                 path.area / path.length2D.
+        As a special case, the following trunk_mode is also supported:
+            "NONE"
+                Processing terminates after isolation of the graph skeleton.
         [1] If max_trunk_count is greater than one, an error is raised.
         [2] This option is at least partially implemented as a brute-force
             search in which paths are considered in the same order as "DEFAULT".
@@ -7627,7 +7769,25 @@ class EasySkeleton(Skeleton):
         safeguards. It is therefore considered advanced functionality and should
         not be changed from its default value without understanding the
         consequences. It is documented with other arguments to
-        Skeleton.__init__().
+        Skeleton.__init__(), except for one additional option supported by the
+        current class:
+            "CUT2"
+                *EXPERIMENTAL AND MAY BE DEPRECATED IN A FUTURE RELEASE*
+                If cutting is used and templating is enabled, Voronoi vertices 
+                that were provisionally interpreted to belong to the skeleton 
+                but were excluded by cutting will be added back to the template 
+                if they lie within the test (input or proxy) polygon. Implies 
+                "CUT". The inclusion of these "suspicious" nodes can help to
+                avoid truncation by cutting at input polygon necks (locally 
+                narrower than twice the template interval). *However*, this is
+                effectively a (limited-scope) brute-force kludge that could
+                potentially exhaust your available memory, as these suspicious
+                nodes are not counted when optimizing an implicit template
+                interval. In practice, this functionality is therefore
+                most useful when the goal is to more fully capture tapering
+                ends of the input polygon rather than to recover extensive
+                swaths of that polygon that are narrower than twice the
+                template interval and/or ringed by necks.
 
         tails is a boolean that specifies whether a segment ("tail") should be
         added to each trunk end and each outward-facing branch end to extend
@@ -7687,18 +7847,17 @@ class EasySkeleton(Skeleton):
         0           <0                   [i3, t1]**
          * Occurs if and when memory becomes exhausted, or if and when the first
            attempt is aborted because such exhaustion is predicted.
-        ** If template_interval is negative, all internal memory safeguards are
-           disabled, but the "SAFE" isolation_mode option is still honored if
-           specified. If the algorithm completes successfully, the skeleton is
-           typically very nearly as topologically complete as the template
-           skeleton. Otherwise, for a non-negative template_interval, stubs are
-           first subset to match those in the template skeleton (as for a
-           negative template_interval) but may then be further subset if deemed
-           necessary to ensure that all processing can be accommodated in
-           available/specified memory. That second subsetting, if required, is
-           based on the normalized length and therefore is intended to
-           prioritize deletion of the least important stubs (and therefore, loss
-           of the least important portions of the skeleton).
+        ** If template_interval is not None, every stub in the (coarse) template
+           skeleton will have a mate (at least, initially) in the hybrid
+           skeleton. If template_interval is (more specifically) negative, 
+           that template skeleton will be an unpruned graph skeleton. Otherwise, 
+           the template skeleton will be a partitioned skeleton that may be 
+           pruned in order of increasing normalized length if such pruning is 
+           necessary to confidently avoid exhaustion of targ_GB. Therefore, a
+           negative template_interval ensures (reproducible) skeletonization 
+           that does not depend on targ_GB but may pose memory hazards that 
+           could be alleviated by discarding potentially unimportant branches 
+           from the template skeleton.
         [i1] Final skeleton is based on sampling at the specified interval.
         [i2] Final skeleton is based on sampling at
              self.estimate_safe_interval(..., include_partitioning=True)[0].
@@ -7760,7 +7919,7 @@ class EasySkeleton(Skeleton):
         # Validate trunk mode.
         trunk_mode_form = _validate_string_option(
             trunk_mode, "trunk_mode",
-            ("DEFAULT",
+            ("DEFAULT", "NONE",
              "EUCLIDEAN", "EUCLIDEAN3D",
              "MIN_EUCLIDEAN_#", "MIN_EUCLIDEAN3D_#",
              "NEAR_#_#", "NEAR_#_#_AND_#_#",
@@ -7796,8 +7955,10 @@ class EasySkeleton(Skeleton):
         reset_attr_dict = self.__dict__.copy()
         may_simulate_interval = (template_interval is not None and
                                  not self._template_interval_applied)
+        isolation_mode = isolation_mode.upper()
+        isolation_mode1 = isolation_mode.replace("CUT2", "CUT")
         if may_simulate_interval:
-            orig_isolation_mode = isolation_mode
+            isolation_mode0 = isolation_mode1
             # Note: math.copysign() is used in case
             # template_interval is -0.
             template_interval_is_positive = _math.copysign(
@@ -7806,15 +7967,13 @@ class EasySkeleton(Skeleton):
             interval_is_implicit = interval == 0.
             # Unless template interval is negative or interval is
             # implicit, ensure that processing is memory safe.
-            isolation_options_set = set(isolation_mode.upper().split("_"))
+            isolation_options_set = set(isolation_mode0.split("_"))
             isolation_options_set.discard("SAFE")
-            unsafe_isolation_mode = "_".join(isolation_options_set)
+            isolation_mode2 = "_".join(isolation_options_set)
             if template_interval_is_positive and not interval_is_implicit:
                 isolation_options_set.add("SAFE")
                 # *REASSIGNMENT*
-                isolation_mode = "_".join(isolation_options_set)
-            else:
-                isolation_mode = orig_isolation_mode
+                isolation_mode1 = "_".join(isolation_options_set)
 
         # Proceed as implied by interval-template_interval combination.
         try:
@@ -7822,9 +7981,15 @@ class EasySkeleton(Skeleton):
                                           not template_interval_is_positive):
                 raise MemoryError
             if not hasattr(self, "polygon"):
-                Skeleton.__init__(self, polygon, interval, isolation_mode,
+                Skeleton.__init__(self, polygon, interval, isolation_mode1,
                                   memory_option, targ_GB)
-            self._generate_skeleton(**locals())
+            if trunk_mode == "NONE":
+                # Isolate the graph skeleton.
+                self.isolate_graph_skeleton()
+            else:
+                # Execute remaining steps, including generating the 
+                # partitioned skeleton.
+                self._generate_skeleton(**locals())
         except MemoryError:
             # Error if use of a template interval is not permitted or if
             # it is known that the non-partitioning memory footprint of
@@ -7832,30 +7997,50 @@ class EasySkeleton(Skeleton):
             # target memory.
             # Note: If "SAFE" is not specified as an isolation_mode
             # option and template_interval is negative, it is not tested
-            # internally whether the simulated interval is safe.
+            # internally whether the simulated interval is safe and 
+            # therefore MemoryError is not (directly) raised by the
+            # current module.
             if (not may_simulate_interval or
                 not getattr(self, "interval_is_nonpartitioning_safe", True)):
                 raise
             self._apply_template(**locals())
 
+        # In case "CUT2" was specified, ensure that this is recorded in 
+        # the corresponding attribute.
+        self.isolation_mode = isolation_mode
+
     @staticmethod  # Note: self is passed when called.
-    def _apply_template(self, orig_isolation_mode, reset_attr_dict,
-                        calling_args, template_interval, tails, polygon,
-                        interval, memory_option, targ_GB,
-                        template_interval_is_positive, min_normalized_length,
-                        unsafe_isolation_mode, **kwargs):
+    def _apply_template(self, isolation_mode, reset_attr_dict, calling_args, 
+                        template_interval, tails, polygon, interval, 
+                        memory_option, targ_GB, template_interval_is_positive, 
+                        min_normalized_length, isolation_mode0, isolation_mode2, 
+                        **kwargs):
 
         # Clear any attributes assigned since .__init__() was first
         # called (e.g., in a skeleton initialization attempt).
         self.__dict__.clear()
         self.__dict__.update(reset_attr_dict)
 
-        # Derive partitioned skeleton at either an explicit or brute-
-        # search template interval.
+        # Derive skeleton at either an explicit or brute-search template 
+        # interval.
+        # Note: The derived skeleton is the partitioned skeleton unless
+        # the template interval is negative.
         template_calling_args = calling_args.copy()        
         template_calling_args["interval"] = abs(template_interval)
         template_calling_args["template_interval"] = None
-        template_calling_args["isolation_mode"] = orig_isolation_mode
+        if not template_interval_is_positive:
+            # Note: If template_interval is negative, it is guaranteed 
+            # that all (usually tailed) stubs will be used, so 
+            # partitioning can be avoided. However, tails must be added
+            # specially, to terminal edges in graph skeleton rather than
+            # branches in partitioned skeleton.
+            template_calling_args["trunk_mode"] = "NONE"
+        cut2 = "CUT2" in isolation_mode
+        if cut2 and "STORE" not in isolation_mode0:
+            template_calling_args["isolation_mode"] = (isolation_mode0 
+                                                       + "_STORE")
+        else:
+            template_calling_args["isolation_mode"] = isolation_mode0
         # Note: Because of the crudity of the template skeleton, do not
         # attempt to apply any constraints.
         ## Could add support so that negative values force the 
@@ -7872,43 +8057,104 @@ class EasySkeleton(Skeleton):
         self.__init__(**template_calling_args)
         targ_GB = self.target_memory_footprint / 2.**30.
 
-        # Add tails, if they were not already added, so that stubs
-        # identified further below are more accurately identified.
-        # Note: Tails are added to partially compensate for the coarser
-        # template interval.
-        if not tails:
-            self.add_tails()
-
         # Preserve relevant results from template skeleton.
         if template_interval == 0.:
             reset_attr_dict["template_interval"] = self.interval
         else:
             reset_attr_dict["template_interval"] = template_interval
-        reset_attr_dict["_cut_vor_vert_idxs_array"] = self._cut_vor_vert_idxs_array
+        reset_attr_dict["cut_vor_vert_idxs_array"] = self.cut_vor_vert_idxs_array
 
-        # Use partitioned skeleton at template interval to identify
-        # the tail (or stub) coordinates that may be most important.
-        # Note: The variable x is used to ensure that all tuples can
-        # be sorted further below (even in the case of identical
-        # normalized lengths) without relying on numpy arrays, which
-        # cannot be sorted.
-        coarse_stub_data = [
-            (branch.normalized_length, x, branch.stub_coords_array)
-            for x, branch in
-            enumerate(self.get_lines("branch", hardness_level=0))
-            ]
-        trunks = self.get_lines("trunk", hardness_level=0)
-        # Note: If trunks were forced to be disjoint (the default), the
-        # first found and therefore primary trunk has the shortest
-        # length, and each successive trunk is longer.
-        trunks.sort(key=lambda line: line.length, reverse=True)
-        for x, trunk in _izip(_itertools.count(-1, -2), trunks):
-            coarse_stub_data.extend(
-                ((_python_inf, x, trunk.coords_array[0]),
-                 (_python_inf, x - 1, trunk.coords_array[-1]))
-                )
-        del branch, trunks, trunk  # Reduce local namespace.
+        # Collect information about coarse tail (or stub) ends from 
+        # partitioned skeleton.
+        if template_interval_is_positive:        
+            
+            # Add tails, if they were not already added, so that stubs
+            # matched further below (from graph skeleton generated with
+            # a fine sampling interval) are more accurately located. 
+            # This partially compensates for the coarser template 
+            # interval.
+            if not tails:
+                self.add_tails()
+                
+            # Use partitioned skeleton at template interval to identify
+            # the tail (or stub) coordinates that may be most important.
+            # Note: The variable x is used to ensure that all tuples can
+            # be sorted further below (even in the case of identical
+            # normalized lengths) without relying on numpy arrays, which
+            # cannot be sorted as Python objects.
+            coarse_stub_data = [
+                (branch.normalized_length, x, branch.stub_coords_array)
+                for x, branch in
+                enumerate(self.get_lines("branch", hardness_level=0))
+                ]
+            trunks = self.get_lines("trunk", hardness_level=0)
+            # Note: If trunks were forced to be disjoint (the default), the
+            # first found and therefore primary trunk has the shortest
+            # length, and each successive trunk is longer.
+            trunks.sort(key=lambda line: line.length, reverse=True)
+            for x, trunk in _izip(_itertools.count(-1, -2), trunks):
+                coarse_stub_data.extend(
+                    ((_python_inf, x, trunk.coords_array[0]),
+                     (_python_inf, x - 1, trunk.coords_array[-1]))
+                    )
+            del branch, trunks, trunk  # Reduce local namespace.
+            
+        else:
+            coarse_stub_data = []
+            
+        # Collect information about coarse tail (or stub) ends from 
+        # graph skeleton and/or cut subgraphs.
+        if not template_interval_is_positive or cut2:
 
+            # If the user has forbidden any filtering of coarse ends (by
+            # specifying a negative template_interval), simply collect
+            # all ends from the *graph* skeleton.
+            # Note: If template_interval is negative, the graph skeleton
+            # was never partitioned.            
+            if not template_interval_is_positive:
+                stub_vor_vert_idxs = self.get_nodes("stub", 
+                                                    coords=False)[0].tolist()
+            else:
+                stub_vor_vert_idxs = []
+                
+            # If user has specified to permit use of "suspicious" 
+            # Vororonoi vertices, include these.
+            voronoi_vertex_coords_array = self.voronoi_vertex_coords_array
+            stub_vor_vert_idxs_append = stub_vor_vert_idxs.append            
+            if cut2 and self.naive_skel_vor_vert_idxs_array is not None:
+                
+                # Initially designate as suspicious all nodes that were 
+                # originally suspected to belong to the skeleton but 
+                # were subsequently excluded by cutting.
+                vor_vert_idx_to_suspicious_array = _numpy.zeros(
+                        (len(voronoi_vertex_coords_array),), _numpy.int8
+                        )
+                vor_vert_idx_to_suspicious_array[self.naive_skel_vor_vert_idxs_array] = 1
+                vor_vert_idx_to_suspicious_array[self.get_nodes("all", coords=False)[0]] = 0
+                suspicious_vor_vor_vert_idxs = vor_vert_idx_to_suspicious_array.nonzero()[0].tolist()
+                del vor_vert_idx_to_suspicious_array
+                
+                # Subset suspicious nodes to include only those that lie 
+                # within the test polygon.
+                test_poly_contains_node = self.test_poly_contains_node
+                for vor_vert_idx in suspicious_vor_vor_vert_idxs:
+                    if test_poly_contains_node(vor_vert_idx):
+                        stub_vor_vert_idxs_append(vor_vert_idx)
+                
+            # Use tail (rather than stub) ends where possible and 
+            # conform format to parallel the partitioned case further 
+            # above.
+            get_tail_end = self.get_tail_end
+            for x, stub_vor_vert_idx in enumerate(stub_vor_vert_idxs):
+                # Note: Prefer tails for the same reason as explained in
+                # the parallel note further above.
+                end_coords_array = get_tail_end(stub_vor_vert_idx, False, 
+                                                False)
+                if end_coords_array is None:
+                    end_coords_array = voronoi_vertex_coords_array[stub_vor_vert_idx]
+                coarse_stub_data.append((0, x, end_coords_array))
+            del stub_vor_vert_idxs
+            
         # Reset and re-initialize self, generating a graph skeleton at
         # the user-specified (fine) interval.
         # Note: Even if these results were generated earlier, they are
@@ -7921,17 +8167,17 @@ class EasySkeleton(Skeleton):
         self.__dict__.update(reset_attr_dict)
         if interval == 0.:
             # Note: 1.1 applies a safety margin.
-            interval = self.estimate_safe_interval(polygon, orig_isolation_mode,
+            interval = self.estimate_safe_interval(polygon, isolation_mode0,
                                                    memory_option, targ_GB,
                                                    False,
                                                    **kwargs["kwargs"])[0] * 1.1
         # Note: Because a safety margin was already applied above, do 
         # not engage the internal memory safety option.
-        Skeleton.__init__(self, polygon, interval, unsafe_isolation_mode,
+        Skeleton.__init__(self, polygon, interval, isolation_mode2,
                           memory_option, targ_GB)
 
         # Unless forbidden by the user, subset the (coarse) template
-        # skeleton's stubs if necessary to ensure that processing can
+        # skeleton's ends if necessary to ensure that processing can
         # complete within available/specified memory.
         (fine_stubs_vor_vert_idxs_array,
          fine_stubs_coords_array, _) = self.get_nodes("stub", loops=False)
@@ -7953,8 +8199,6 @@ class EasySkeleton(Skeleton):
             templated_node_count = (fine_hub_count
                                     - fine_stub_count
                                     + 2*template_stub_count)
-            #templated_node_count = (self.get_node_count("hub", loops=False)
-            #                        + template_stub_count)
             if templated_node_count > safe_node_count:
                 # Determine how many stubs can be retained in the
                 # template skeleton to ensure safe processing.
@@ -8021,7 +8265,7 @@ class EasySkeleton(Skeleton):
         # Partition the (gobbled, fine) graph skeleton.
         final_calling_args = calling_args.copy()
         final_calling_args["interval"] = interval        
-        final_calling_args["isolation_mode"] = orig_isolation_mode                
+        final_calling_args["isolation_mode"] = isolation_mode                
         final_calling_args["targ_GB"] = targ_GB
         self._template_interval_applied = True
         # Note: Skeleton is not re-initialized.        

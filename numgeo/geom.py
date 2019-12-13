@@ -19,7 +19,7 @@ Incomplete geometric library primarily based on numpy arrays.
 # You should have received a copy of the GNU General Public License
 # along with numgeo.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = "0.0.1a0"
+__version__ = "0.0.2a0"
 __author__ = "Ethan I. Schaefer"
 
 

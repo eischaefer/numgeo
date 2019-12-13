@@ -19,7 +19,7 @@ Script-like demo code for deriving skeletons from input polygons.
 # You should have received a copy of the GNU General Public License
 # along with numgeo.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = "0.0.1a0"
+__version__ = "0.0.2a0"
 __author__ = "Ethan I. Schaefer"
 __all__ = ["process"]
 
@@ -115,6 +115,11 @@ def process(
     output_unpar=True,  # Output unused graph edges?
     output_test_poly=True,  # Output testing (orig. or proxy) poly.?
     output_rot_poly=True,  # Output rotated polygon?
+    
+    # Other options.
+    # Note: The option below halts skeletonization after isolation of 
+    # the graph skeleton.
+    graph_only=False,
 
     # numgeo.skel.EasySkeleton() arguments with defaults.
     **skel_kwargs
@@ -256,6 +261,11 @@ def process(
     
     output_rot_poly is a boolean that specifies whether a possibly rotated 
     copy of each input polygon should be outputted.
+    
+    graph_only is a boolean that specifies whether to halt skeletonization 
+    after isolation of the graph skeleton. If graph_only is True, no paths are
+    partitioned out and the entire graph skeleton will be outputted to 
+    unpar_out_path if output_unpar is True.
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
     Any additional keyword arguments are passed to EasySkeleton.__init__()
     when it is called internally.
@@ -294,7 +304,7 @@ def process(
         NoTail2D    length of the line, excluding any tail, in the x-y plane
         NoTailNL    normalized length, excluding any tail
         OptIntrvl   optimized interval (for targeted memory footprint)
-        OrigID      feature ID of input polygon.
+        PolyID      feature ID of input polygon.
         Rotated     whether 0-vertex was rotated (True/False)
         SampIdx     boundary sample index
         SampIdx1    boundary sample index associated with Voronoi segment
@@ -321,14 +331,21 @@ def process(
     # Standardize path to output directory.
     if out_dir_path is None:
         out_dir_path = os.path.dirname(in_path)  # *REASSIGNMENT*
+    out_dir_path_info = numgeo.vec_io.Information(out_dir_path)
+    if not out_dir_path_info.exists:
+        raise TypeError("out_dir_path does not exist: {}".format(out_dir_path))
     final_kwargs["out_dir_path"] = os.path.abspath(out_dir_path)
 
     # Derive unspecified output paths.
-    base, ext = os.path.splitext(os.path.basename(in_path))
+    base = os.path.splitext(os.path.basename(in_path))[0]
     format_out_path = "{}_{{}}{}{{}}".format(
         os.path.join(out_dir_path, "{}{}".format(out_path_prefix, base)),
         out_path_suffix
         ).format
+    if out_dir_path_info.format_type == "ESRI FileGDB":
+        ext = ""
+    else:
+        ext = ".shp"
     for k, v in final_kwargs.items():
         if k.endswith("_out_path") and v is None:
             if k != "log_out_path":
@@ -370,6 +387,10 @@ def process(
         for k, v in final_kwargs.items():
             if k.startswith("output_") and k != "output_log":
                 final_kwargs[k] = False
+                
+    # Optionally apply graph_only option.
+    if graph_only:
+        final_kwargs["trunk_mode"] = "NONE"
 
     # Validate monitor_memory option.
     if monitor_memory is None:
@@ -405,7 +426,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
              output_copy_only, output_skeleton, output_cut_nodes, 
              output_skeleton_nodes, output_vor_segs, output_vor_verts, 
              output_samps, output_unpar, output_test_poly, output_rot_poly, 
-             skel_kwargs, **more_skel_kwargs):
+             graph_only, skel_kwargs, **more_skel_kwargs):
 
     # Store calling argument values.
     skel_kwargs.update(more_skel_kwargs)
@@ -486,7 +507,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                                 del poly.data[field_name]
                         # Note: Any existing fields with the same names
                         # will be overwritten.
-                        poly.data["OrigID"] = poly.ID
+                        poly.data["PolyID"] = poly.ID
                         poly.data["OptIntrvl"] = opt_interval
                         poly.data["LwrBndInvl"] = lower_bound_interval
                         if math.isinf(upper_bound_interval):
@@ -659,10 +680,12 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                             if monitor_memory:
                                 part.data["ComputeGB"] = computations_GB
                                 part.data["CumMaxGB"] = cum_max_GB
-                            part.data["OrigID"] = poly.ID
+                            part.data["PolyID"] = poly.ID
                             out_skel_data.append(part)
                         if reduce_peak_memory:
-                            del parts, part
+                            if parts:
+                                del part
+                            del parts
                     if reduce_peak_memory:
                         del out_skel_data
                     logger.end("skeleton_writeout", poly)
@@ -699,7 +722,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                                 node.spatial_reference = spatial_reference
                                 node.data["VorIdx"] = idx
                                 node.data["Kind"] = "cut"
-                                node.data["OrigID"] = poly.ID
+                                node.data["PolyID"] = poly.ID
                                 out_cut_data.append(node)
                             if reduce_peak_memory:
                                 del (cut_node_coords_array, cut_node_idxs,
@@ -740,7 +763,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                                 node.spatial_reference = spatial_reference
                                 node.data["VorIdx"] = idx
                                 node.data["Kind"] = kind
-                                node.data["OrigID"] = poly.ID
+                                node.data["PolyID"] = poly.ID
                                 out_skelp_data.append(node)
                             if reduce_peak_memory:
                                 del node_coords_array, node_idxs, nodes, node
@@ -760,7 +783,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                                 edge.data["FromVorIdx"] = from_vor_idx
                                 edge.data["ToVorIdx"] = to_vor_idx
                                 edge.data["Length2D"] = edge.length2D
-                                edge.data["OrigID"] = poly.ID
+                                edge.data["PolyID"] = poly.ID
                                 out_unpar_data.append(edge)
                         logger.end("unused_edge_writeout", poly)
                         if reduce_peak_memory:
@@ -794,7 +817,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                             # *REDEFINITION*
                             test_poly = numgeo.geom.Polygon2D(test_poly.boundary)
                             test_poly.spatial_reference = spatial_reference
-                        test_poly.data["OrigID"] = poly.ID
+                        test_poly.data["PolyID"] = poly.ID
                         out_test_data.append(test_poly)
                     if reduce_peak_memory:
                         del out_test_data, test_poly, skel.test_poly
@@ -811,7 +834,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                             if field_name.upper() in ("SHAPE_LENGTH",
                                                       "SHAPE_AREA"):
                                 del poly.data[field_name]
-                        poly.data["OrigID"] = poly.ID
+                        poly.data["PolyID"] = poly.ID
                         poly.data["Rotated"] = repr(bool(rotation_number))
                         out_rot_data.append(poly)
                     if reduce_peak_memory:
@@ -839,7 +862,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                         for idx, point in enumerate(samps):
                             point.spatial_reference = spatial_reference
                             point.data["SampIdx"] = idx
-                            point.data["OrigID"] = poly.ID
+                            point.data["PolyID"] = poly.ID
                             out_samp_data.append(point)
                     if reduce_peak_memory:
                         del samps, out_samp_data, skel.sampled_coords_array, point
@@ -863,7 +886,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                             ) as out_vorp_data:
                             for point in skel.voronoi.iter_points():
                                 point.data["VorIdx"] = point.out_idx
-                                point.data["OrigID"] = poly.ID
+                                point.data["PolyID"] = poly.ID
                                 out_vorp_data.append(point)
                         if reduce_peak_memory:
                             del out_vorp_data, point
@@ -895,7 +918,7 @@ def _process(orig_kwargs, in_path, out_path_prefix, out_path_suffix,
                                 (line.data["SampIdx1"],
                                  line.data["SampIdx2"]) = line.in_idxs_array.tolist()
                                 line.data["Length2D"] = line.length2D
-                                line.data["OrigID"] = poly.ID
+                                line.data["PolyID"] = poly.ID
                                 out_vor_data.append(line)
                         if reduce_peak_memory:
                             del vor_lines, out_vor_data, line
